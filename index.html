@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Track your application</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#EEF3F8;--ink:#12213A;--mute:#52627A;--line:#C9D5E3;--card:#fff;--accent:#0B6E63;--err:#B42318;--errbg:#FDECEA}
+@media (prefers-color-scheme:dark){:root{--bg:#0D1626;--ink:#E7EEF8;--mute:#9FB0C7;--line:#2A3B55;--card:#14233A;--accent:#4FD1BF;--err:#FF9A8F;--errbg:#3A1B1B}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font:16px/1.5 "Bricolage Grotesque",system-ui,sans-serif;display:grid;place-items:center;padding:20px}
+main{width:100%;max-width:520px}
+h1{font-size:clamp(1.9rem,6vw,2.6rem);line-height:1.1;margin:0 0 8px;letter-spacing:-.02em}
+p.lead{color:var(--mute);margin:0 0 24px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px}
+label{display:block;font-weight:700;margin-bottom:8px}
+.row{display:flex;gap:10px}
+input{flex:1;min-width:0;font:500 1.15rem "IBM Plex Mono",monospace;letter-spacing:.06em;text-transform:uppercase;padding:12px 14px;border:2px solid var(--line);border-radius:10px;background:transparent;color:var(--ink)}
+input[aria-invalid=true]{border-color:var(--err)}
+button{font-weight:700;font-size:1rem;font-family:inherit;padding:0 20px;border:0;border-radius:10px;background:var(--accent);color:#fff;cursor:pointer;min-height:48px}
+@media (prefers-color-scheme:dark){button{color:#06231F}}
+button:disabled{opacity:.6;cursor:wait}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.hint{color:var(--mute);font-size:.88rem;margin:8px 0 0}
+#error{margin-top:14px;padding:12px 14px;border-radius:10px;background:var(--errbg);color:var(--err);font-weight:500}
+#result{margin-top:18px}
+.label{font-size:1.4rem;font-weight:700;margin:0}
+.meta{color:var(--mute);font-size:.9rem;margin:2px 0 14px}
+ol{list-style:none;margin:0 0 14px;padding:0;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+li{border-top:5px solid var(--line);padding-top:6px;font-size:.8rem;color:var(--mute)}
+li.done{border-color:var(--accent);color:var(--ink)}
+li.now{border-color:var(--accent);color:var(--ink);font-weight:700}
+.note{margin:0;padding:10px 12px;border-left:4px solid var(--accent);background:var(--bg);border-radius:0 8px 8px 0}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <h1>Where is my application?</h1>
+  <p class="lead">Enter the tracking code from your confirmation email.</p>
+  <form class="card" id="form" novalidate>
+    <label for="code">Tracking code</label>
+    <div class="row">
+      <input id="code" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="14" placeholder="APP-XXXX-XXXX" aria-describedby="hint error">
+      <button id="go" type="submit">Check status</button>
+    </div>
+    <p class="hint" id="hint">Example format: APP-7K3M-9QXH</p>
+    <div id="error" role="alert" hidden></div>
+    <section id="result" aria-live="polite" hidden>
+      <p class="label" id="rLabel"></p>
+      <p class="meta" id="rMeta"></p>
+      <ol id="steps"></ol>
+      <p class="note" id="rNote" hidden></p>
+    </section>
+  </form>
+</main>
+<script>
+// >>> Set these two values after deploying (Supabase → Project Settings → API) <<<
+const SUPABASE_URL = "https://hxswpgiktxteakbbolkh.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_6vwzAj1S9ZPZd2wAqFIqsA_gMmx5Uqr";
+
+const STEPS = [["received","Received"],["under_review","Review"],["interview","Interview"],["decision","Decision"]];
+const $ = (id) => document.getElementById(id);
+const input = $("code"), err = $("error"), res = $("result"), btn = $("go");
+
+function showError(msg){ res.hidden = true; err.textContent = msg; err.hidden = false; input.setAttribute("aria-invalid","true"); input.focus(); }
+function clearAll(){ err.hidden = true; res.hidden = true; input.removeAttribute("aria-invalid"); }
+
+function showResult(d){
+  $("rLabel").textContent = d.label;
+  $("rMeta").textContent = "Last updated " + new Date(d.updated_at).toLocaleDateString(undefined,{dateStyle:"medium"});
+  const idx = STEPS.findIndex(s => s[0] === d.status);
+  $("steps").innerHTML = "";
+  STEPS.forEach((s,i) => {
+    const li = document.createElement("li");
+    li.textContent = s[1];
+    if (i < idx) li.className = "done";
+    if (i === idx) { li.className = "now"; li.setAttribute("aria-current","step"); }
+    $("steps").appendChild(li);
+  });
+  $("rNote").hidden = !d.note; $("rNote").textContent = d.note || "";
+  res.hidden = false;
+}
+
+$("form").addEventListener("submit", async (e) => {
+  e.preventDefault(); clearAll();
+  const code = input.value.trim();
+  if (!code) return showError("Enter your tracking code to continue.");
+  btn.disabled = true; btn.textContent = "Checking…";
+  try {
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 20000);
+    const r = await fetch(SUPABASE_URL + "/functions/v1/check-status", {
+      method: "POST",
+      headers: {"Content-Type":"application/json","apikey":SUPABASE_ANON_KEY},
+      body: JSON.stringify({ code }), signal: ctl.signal
+    });
+    clearTimeout(t);
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.ok) showResult(d);
+    else showError(d.message || "Something went wrong. Please try again later.");
+  } catch (e) { showError(e.name === "AbortError" ? "The server is taking too long. Please try again." : "Can't reach the server. Check your connection and try again."); }
+  finally { btn.disabled = false; btn.textContent = "Check status"; }
+});
+</script>
+</body>
+</html>
